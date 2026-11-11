@@ -15,6 +15,6 @@ GitHub Pages 提供靜態網站。這個版本在 GitHub Pages 上使用瀏覽�
 
 ## 三人共用版本
 
-需另行將 `Code.gs` 與 `Index.html` 部署至 Google Apps Script，並連接指定的 Google 試算表。編輯密碼目前仍為未設定的佔位文字；正式部署前應在私人 Apps Script 專案設定，勿將實際密碼提交到公開 GitHub 儲存庫。
+需另行將 `Code.gs` 與 `Index.html` 部署至 Google Apps Script，並連接指定的 Google 試算表。編輯密碼改由 Apps Script「專案設定 → 指令碼屬性」的 `EDIT_PIN` 讀取，需設定為 6～8 位數。勿將實際密碼提交到公開 GitHub 儲存庫。
 
-本次 GitHub 發布未部署 Apps Script，亦未修改雲端試算表。
+Apps Script 同步程式已建立，等待擁有者完成 Google 授權、設定存取方式與編輯密碼；完成前 GitHub Pages 仍為本機預覽。按鈕文字已統一為「開始編輯」。
