@@ -3,6 +3,8 @@
  * 將此 Code.gs 與 Index.html 放在「庫存資料庫」試算表的 Apps Script 專案中。
  * 選擇更新人員即可編輯；以網頁應用程式部署。
  */
+const WAREHOUSE_LOCATIONS = Object.freeze({'塔塔小倉庫':['螞蟻區','狗窩'],'朵朵小倉庫':['螞蟻區','貓居']});
+const INITIAL_LOCATION = 'secondary';
 const STOCK_CONFIG = Object.freeze({
   SPREADSHEET_ID: '1muJtwE_jLDscIHjakC0POIN8fTV9Yl9_rr8atH6_pZs',
   INVENTORY_SHEET: '庫存',
@@ -17,7 +19,8 @@ function doGet() {
 }
 
 /** 檢視者無需密碼；任何具有網頁檢視權的人都能讀取庫存。 */
-function getInventory() {
+function getInventory(schemaVersion) {
+  ensureLocations_();
   const file = SpreadsheetApp.openById(STOCK_CONFIG.SPREADSHEET_ID);
   const sheet = requireSheet_(file, STOCK_CONFIG.INVENTORY_SHEET);
   const data = sheet.getDataRange().getValues();
@@ -27,14 +30,14 @@ function getInventory() {
   let history = [];
   if (last >= 2) {
     const first = Math.max(2, last - 499);
-    history = logSheet.getRange(first, 1, last - first + 1, 12).getValues().reverse()
+    history = logSheet.getRange(first, 1, last - first + 1, 13).getValues().reverse()
       .filter(function(r){return !!r[0];})
       .map(function(r){
         return {timestamp: toText_(r[0]), action:toText_(r[1]), id:toText_(r[2]),
           warehouse:toText_(r[3]), name:toText_(r[4]), oldQuantity:r[5]===''?null:Number(r[5]),
           newQuantity:r[6]===''?null:Number(r[6]), delta:r[7]===''?null:Number(r[7]),
           oldIncoming:Number(r[8])||0, newIncoming:Number(r[9])||0,
-          actor:toText_(r[10]), notes:toText_(r[11])};
+          actor:toText_(r[10]), notes:toText_(r[11]),location:toText_(r[12])};
       });
   }
   const categorySheet = file.getSheetByName(STOCK_CONFIG.CATEGORY_SHEET);
@@ -43,7 +46,7 @@ function getInventory() {
       .filter(function(r){return r[0] && r[1] && r[4] !== false;})
       .map(function(r){return {warehouse:toText_(r[0]),name:toText_(r[1]),createdAt:toText_(r[2]),createdBy:toText_(r[3]),active:true};})
     : [];
-  return {items:entries,categories:categories,history:history,now:new Date().toISOString()};
+  return {items:Number(schemaVersion)===3?entries:entries.filter(function(x){return x.location===WAREHOUSE_LOCATIONS[x.warehouse][1];}),categories:categories,history:history,locations:WAREHOUSE_LOCATIONS,now:new Date().toISOString()};
 }
 
 /** 更新人員用於異動署名；此網站允許持有連結者免密碼編輯。 */
@@ -51,6 +54,7 @@ function validateActor_(actor) {
   if (!['螞蟻','塔塔','朵朵'].includes(String(actor || ''))) {
     throw new Error('請先選擇螞蟻、塔塔或朵朵');
   }
+  ensureLocations_();
 }
 
 function setQuantity(request) {
@@ -62,6 +66,7 @@ function setQuantity(request) {
     const s=requireSheet_(file, STOCK_CONFIG.INVENTORY_SHEET);
     const found=findRow_(s,p.id);
     const old=found.item;
+    if(p.location && p.location!==old.location)throw new Error('存放區已變更，請重新整理');
     if (Object.prototype.hasOwnProperty.call(p,'expectedQuantity')) {
       const expected = p.expectedQuantity === null ? null : Number(p.expectedQuantity);
       if (expected !== old.quantity) throw new Error('這個品項已被其他人更新，請重新整理後再修改');
@@ -88,15 +93,32 @@ function upsertProduct(request) {
   return withLock_(function(file){
     const s=requireSheet_(file,STOCK_CONFIG.INVENTORY_SHEET);
     const at=new Date().toISOString();
-    let id=String(p.id||''), old=null, row;
-    if (id) {
-      const f=findRow_(s,id);row=f.row;old=f.item;
-    } else {
-      id=(warehouse==='朵朵小倉庫'?'D':'T')+'-'+Utilities.getUuid().slice(0,8).toUpperCase();
-      row=s.getLastRow()+1;
+    let id=String(p.id||''),old=null,row,productId;
+    const location=validLocation_(warehouse,p.location);
+    if(id){
+      const f=findRow_(s,id);row=f.row;old=f.item;productId=old.productId;
+      if(old.warehouse!==warehouse || old.location!==location)throw new Error('品項的倉庫與存放區不可變更');
+      if(p.expectedUpdatedAt!==undefined && String(p.expectedUpdatedAt)!==old.updatedAt)throw new Error('這個品項已被其他人更新，請重新整理後再修改');
+    }else{
+      productId=(warehouse==='朵朵小倉庫'?'D':'T')+'-'+Utilities.getUuid().slice(0,8).toUpperCase();
+      id=productId+'~'+WAREHOUSE_LOCATIONS[warehouse].indexOf(location);
     }
-    const obj={id:id,warehouse:warehouse,category:category,name:name,quantity:qty,minStock:min,incoming:incoming,notes:notes,updatedAt:at,updatedBy:actor,active:true};
-    s.getRange(row,1,1,11).setValues([[obj.id,obj.warehouse,obj.category,obj.name,obj.quantity,obj.minStock,obj.incoming,obj.notes,obj.updatedAt,obj.updatedBy,true]]);
+    const obj={id,productId,location,warehouse,category,name,quantity:qty,minStock:min,incoming,notes,updatedAt:at,updatedBy:actor,active:true};
+    if(old){
+      const peers=productRows_(s,productId);
+      peers.forEach(function(peer){
+        // 名稱、分類與提醒共用；數量、待到貨及備註分區管理。
+        const x=peer.item;
+        x.name=name;x.category=category;x.minStock=min;x.updatedAt=at;x.updatedBy=actor;
+        if(x.id===id){x.quantity=qty;x.incoming=incoming;x.notes=notes;}
+        writeItem_(s,peer.row,x);
+      });
+    }else{
+      WAREHOUSE_LOCATIONS[warehouse].forEach(function(loc,i){
+        const x=Object.assign({},obj,{id:productId+'~'+i,location:loc,quantity:loc===location?qty:0,incoming:loc===location?incoming:0,notes:loc===location?notes:''});
+        writeItem_(s,s.getLastRow()+1,x);
+      });
+    }
     log_(file,at,old?'更新品項':'新增品項',obj,old?old.quantity:0,qty,old?old.incoming:0,incoming,actor,notes);
     return obj;
   });
@@ -197,9 +219,8 @@ function deleteProduct(request) {
   return withLock_(function(file){
     const s=requireSheet_(file,STOCK_CONFIG.INVENTORY_SHEET);
     const f=findRow_(s,p.id),at=new Date().toISOString();
-    s.getRange(f.row,11).setValue(false);
-    s.getRange(f.row,9,1,2).setValues([[at,actor]]);
-    log_(file,at,'刪除品項',f.item,f.item.quantity,f.item.quantity,f.item.incoming,f.item.incoming,actor,'已停用');
+    productRows_(s,f.item.productId).forEach(function(peer){s.getRange(peer.row,11).setValue(false);s.getRange(peer.row,9,1,2).setValues([[at,actor]]);});
+    log_(file,at,'刪除品項',f.item,f.item.quantity,f.item.quantity,f.item.incoming,f.item.incoming,actor,'已從兩個存放區停用');
     return {success:true,id:f.item.id};
   });
 }
@@ -224,7 +245,7 @@ function findRow_(s,id) {
   for(let i=0;i<ids.length;i++) {
     if(String(ids[i][0])===id) {
       const row=i+2;
-      const data=s.getRange(row,1,1,11).getValues()[0];
+      const data=s.getRange(row,1,1,13).getValues()[0];
       if(data[10]===false) throw new Error('這個品項已刪除');
       return {row:row,item:rowToItem_(data)};
     }
@@ -234,12 +255,12 @@ function findRow_(s,id) {
 function rowToItem_(r) {
   return {id:toText_(r[0]),warehouse:toText_(r[1]),category:toText_(r[2]),name:toText_(r[3]),
     quantity:r[4]===''||r[4]===null?null:Number(r[4]),minStock:Number(r[5])||0,incoming:Number(r[6])||0,
-    notes:toText_(r[7]),updatedAt:toText_(r[8]),updatedBy:toText_(r[9]),active:r[10]!==false};
+    notes:toText_(r[7]),updatedAt:toText_(r[8]),updatedBy:toText_(r[9]),active:r[10]!==false,productId:toText_(r[11]||r[0]),location:toText_(r[12]||(WAREHOUSE_LOCATIONS[r[1]]||[])[1]||'')};
 }
 function log_(file,at,action,item,oldQty,newQty,oldIncoming,newIncoming,actor,note) {
   requireSheet_(file,STOCK_CONFIG.HISTORY_SHEET).appendRow([
     at,action,item.id,item.warehouse,item.name,oldQty===null?'':oldQty,newQty===null?'':newQty,oldQty===null?'':newQty-oldQty,
-    oldIncoming,newIncoming,actor,note
+    oldIncoming,newIncoming,actor,note,item.location||''
   ]);
 }
 function validInt_(v,label) {
@@ -256,4 +277,52 @@ function safeText_(v,max) {
 function toText_(v) {
   if (v instanceof Date) return v.toISOString();
   return v==null?'':String(v);
+}
+
+function validLocation_(warehouse,location){
+  if(!WAREHOUSE_LOCATIONS[warehouse] || !WAREHOUSE_LOCATIONS[warehouse].includes(location))throw new Error('請選擇正確的存放區');
+  return location;
+}
+function productRows_(s,productId){
+  if(s.getLastRow()<2)return [];
+  return s.getRange(2,1,s.getLastRow()-1,13).getValues().map(function(r,i){return {row:i+2,item:rowToItem_(r)};}).filter(function(p){return p.item.productId===productId && p.item.active;});
+}
+function writeItem_(s,row,x){
+  s.getRange(row,1,1,13).setValues([[x.id,x.warehouse,x.category,x.name,x.quantity===null?'':x.quantity,x.minStock,x.incoming,x.notes,x.updatedAt,x.updatedBy,x.active,x.productId,x.location]]);
+}
+/** 一次性、可重試分區遷移；先備份，不覆寫原有數量。 */
+function ensureLocations_(){
+  const props=PropertiesService.getScriptProperties();
+  if(props.getProperty('STOCK_LOCATIONS_V1')==='done')return;
+  withLock_(function(file){
+    if(props.getProperty('STOCK_LOCATIONS_V1')==='done')return;
+    const s=requireSheet_(file,STOCK_CONFIG.INVENTORY_SHEET);
+    const backupName='庫存_分區前備份_20261111';
+    if(!file.getSheetByName(backupName))s.copyTo(file).setName(backupName);
+    const rows=s.getLastRow()>1?s.getRange(2,1,s.getLastRow()-1,13).getValues():[];
+    s.getRange(1,12,1,2).setValues([['productId','location']]);
+    requireSheet_(file,STOCK_CONFIG.HISTORY_SHEET).getRange(1,13).setValue('location');
+    const pairs=new Set(rows.filter(function(r){return r[11]&&r[12];}).map(function(r){return r[11]+'::'+r[12];}));
+    const baseRows=rows.filter(function(r){return r[0]&&!r[11];});
+    baseRows.forEach(function(r){
+      const locations=WAREHOUSE_LOCATIONS[r[1]];
+      if(!locations)throw new Error('不支援的倉庫：'+r[1]);
+      const originalLocation=INITIAL_LOCATION==='螞蟻區'?'螞蟻區':locations[1];
+      r[11]=r[0];r[12]=originalLocation;
+    });
+    // 先補齊原始行的識別欄，歷史紀錄仍可沿用舊 id。
+    rows.forEach(function(r,i){if(r[0])s.getRange(i+2,12,1,2).setValues([[r[11]||r[0],r[12]||'螞蟻區']]);});
+    const originals=rows.filter(function(r){return r[0]&&r[11]===r[0];});
+    originals.forEach(function(r){
+      WAREHOUSE_LOCATIONS[r[1]].forEach(function(loc,i){
+        const key=r[11]+'::'+loc;
+        if(loc===r[12]||pairs.has(key))return;
+        const copy=r.slice();copy[0]=r[11]+'~'+i;copy[4]=0;copy[6]=0;copy[7]='';copy[8]='';copy[9]='';copy[12]=loc;
+        s.getRange(s.getLastRow()+1,1,1,13).setValues([copy]);pairs.add(key);
+      });
+    });
+    s.getRange(1,12,1,2).setFontWeight('bold').setBackground('#eaf0f5');
+    s.setColumnWidth(12,140);s.setColumnWidth(13,100);
+    props.setProperty('STOCK_LOCATIONS_V1','done');
+  });
 }
