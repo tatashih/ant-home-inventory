@@ -1,14 +1,14 @@
 /**
  * 螞蟻家庫存｜Google Apps Script 雲端後端
  * 將此 Code.gs 與 Index.html 放在「庫存資料庫」試算表的 Apps Script 專案中。
- * 只需設定下方 EDIT_PIN，然後部署為網頁應用程式。
+ * 在專案設定的指令碼屬性設定 EDIT_PIN，然後部署為網頁應用程式。
  */
 const STOCK_CONFIG = Object.freeze({
   SPREADSHEET_ID: '1muJtwE_jLDscIHjakC0POIN8fTV9Yl9_rr8atH6_pZs',
   INVENTORY_SHEET: '庫存',
   HISTORY_SHEET: '異動紀錄',
   CATEGORY_SHEET: '系列',
-  EDIT_PIN: '請改成你的6到8位數密碼'
+  EDIT_PIN: PropertiesService.getScriptProperties().getProperty('EDIT_PIN') || ''
 });
 
 function doGet() {
@@ -50,7 +50,7 @@ function getInventory() {
 /** 編輯密碼只在後端驗證，絕不輸出到公開 HTML。 */
 function verifyPin(pin) {
   if (!/^\d{6,8}$/.test(STOCK_CONFIG.EDIT_PIN)) {
-    throw new Error('管理者尚未設定 6～8 位數的編輯密碼，請先修改 Code.gs 的 EDIT_PIN。');
+    throw new Error('管理者尚未設定 6～8 位數的編輯密碼，請先在專案設定的指令碼屬性設定 EDIT_PIN。');
   }
   return String(pin || '') === STOCK_CONFIG.EDIT_PIN;
 }
