@@ -323,6 +323,7 @@ function ensureLocations_(){
     });
     s.getRange(1,12,1,2).setFontWeight('bold').setBackground('#eaf0f5');
     s.setColumnWidth(12,140);s.setColumnWidth(13,100);
+    SpreadsheetApp.flush();
     props.setProperty('STOCK_LOCATIONS_V1','done');
   });
 }
