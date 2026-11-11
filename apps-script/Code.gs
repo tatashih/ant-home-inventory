@@ -1,14 +1,13 @@
 /**
  * 螞蟻家庫存｜Google Apps Script 雲端後端
  * 將此 Code.gs 與 Index.html 放在「庫存資料庫」試算表的 Apps Script 專案中。
- * 在專案設定的指令碼屬性設定 EDIT_PIN，然後部署為網頁應用程式。
+ * 選擇更新人員即可編輯；以網頁應用程式部署。
  */
 const STOCK_CONFIG = Object.freeze({
   SPREADSHEET_ID: '1muJtwE_jLDscIHjakC0POIN8fTV9Yl9_rr8atH6_pZs',
   INVENTORY_SHEET: '庫存',
   HISTORY_SHEET: '異動紀錄',
-  CATEGORY_SHEET: '系列',
-  EDIT_PIN: PropertiesService.getScriptProperties().getProperty('EDIT_PIN') || ''
+  CATEGORY_SHEET: '系列'
 });
 
 function doGet() {
@@ -47,20 +46,16 @@ function getInventory() {
   return {items:entries,categories:categories,history:history,now:new Date().toISOString()};
 }
 
-/** 編輯密碼只在後端驗證，絕不輸出到公開 HTML。 */
-function verifyPin(pin) {
-  if (!/^\d{6,8}$/.test(STOCK_CONFIG.EDIT_PIN)) {
-    throw new Error('管理者尚未設定 6～8 位數的編輯密碼，請先在專案設定的指令碼屬性設定 EDIT_PIN。');
+/** 更新人員用於異動署名；此網站允許持有連結者免密碼編輯。 */
+function validateActor_(actor) {
+  if (!['螞蟻','塔塔','朵朵'].includes(String(actor || ''))) {
+    throw new Error('請先選擇螞蟻、塔塔或朵朵');
   }
-  return String(pin || '') === STOCK_CONFIG.EDIT_PIN;
-}
-function authorize_(pin) {
-  if (!verifyPin(pin)) throw new Error('編輯密碼不正確');
 }
 
 function setQuantity(request) {
   const p = request || {};
-  authorize_(p.pin);
+  validateActor_(p.actor);
   const qty = validInt_(p.quantity, '現貨數量');
   const actor = safeText_(p.actor || '小幫手', 40);
   return withLock_(function(file){
@@ -81,10 +76,10 @@ function setQuantity(request) {
   });
 }
 
-/** 允許新增與修改品項，但需知道編輯密碼。 */
+/** 選擇更新人員後允許新增與修改品項。 */
 function upsertProduct(request) {
   const p = request || {};
-  authorize_(p.pin);
+  validateActor_(p.actor);
   const warehouse = String(p.warehouse || '');
   if (!['塔塔小倉庫','朵朵小倉庫'].includes(warehouse)) throw new Error('請選擇正確的倉庫');
   const name=safeText_(p.name,60), category=safeText_(p.category,50),notes=safeText_(p.notes,200),actor=safeText_(p.actor||'小幫手',40);
@@ -110,7 +105,7 @@ function upsertProduct(request) {
 /** 新增一個獨立系列，允許 0 商品；會在三人的雲端檢視中持續存在。 */
 function addCategory(request) {
   const p=request||{};
-  authorize_(p.pin);
+  validateActor_(p.actor);
   const warehouse=String(p.warehouse||'');
   if(!['塔塔小倉庫','朵朵小倉庫'].includes(warehouse))throw new Error('請選擇正確的倉庫');
   const name=safeText_(p.name,50),actor=safeText_(p.actor||'小幫手',40);
@@ -144,7 +139,7 @@ function allCategoryNames_(inventory,categories,warehouse){
 /** 系列改名一次更新同倉庫所有品項，保留庫存與單筆異動記錄。 */
 function renameCategory(request) {
   const p=request||{};
-  authorize_(p.pin);
+  validateActor_(p.actor);
   const warehouse=String(p.warehouse||'');
   if (!['塔塔小倉庫','朵朵小倉庫'].includes(warehouse)) throw new Error('請選擇正確的倉庫');
   const oldName=safeText_(p.oldName,50),newName=safeText_(p.newName,50),actor=safeText_(p.actor||'小幫手',40);
@@ -179,7 +174,7 @@ function renameCategory(request) {
 /** 到貨後將待到貨數轉進現貨，避免未到貨商品被誤算。 */
 function receiveIncoming(request) {
   const p=request||{};
-  authorize_(p.pin);
+  validateActor_(p.actor);
   const actor=safeText_(p.actor||'小幫手',40);
   return withLock_(function(file){
     const s=requireSheet_(file,STOCK_CONFIG.INVENTORY_SHEET);
@@ -197,7 +192,7 @@ function receiveIncoming(request) {
 /** 刪除使用軟刪除，保留紀錄供追溯。 */
 function deleteProduct(request) {
   const p=request||{};
-  authorize_(p.pin);
+  validateActor_(p.actor);
   const actor=safeText_(p.actor||'小幫手',40);
   return withLock_(function(file){
     const s=requireSheet_(file,STOCK_CONFIG.INVENTORY_SHEET);
