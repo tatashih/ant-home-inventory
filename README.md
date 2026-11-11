@@ -1,20 +1,22 @@
-# 螞蟻家庫存
+# 螞蟻家庫存｜三人同步
 
-網站：https://tatashih.github.io/ant-home-inventory/
+[開啟共用庫存](https://tatashih.github.io/ant-home-inventory/)
 
-## GitHub Pages 使用限制
+GitHub Pages 首頁會自動導向 Google Apps Script 網頁應用程式。螞蟻、塔塔、朵朵使用同一份 Google 試算表資料；修改後其他人的畫面每 30 秒自動同步，也可手動重新整理。查看免密碼，編輯需共用密碼。選擇人員用來記錄更新者，並非獨立帳號驗證。
 
-GitHub Pages 提供靜態網站。這個版本在 GitHub Pages 上使用瀏覽器 localStorage 儲存修改，各裝置與瀏覽器的資料彼此獨立，**尚未支援三人同步庫存**。清除網站資料可能遺失該瀏覽器的修改。
+## 原始碼
 
-## 檔案
+- `index.html`：前往雲端同步版的入口。
+- `apps-script/Index.html`：庫存介面，確認按鈕為「開始編輯」。
+- `apps-script/Code.gs`：Google 試算表讀寫、異動紀錄、鎖定與庫存衝突檢查。
+- `部署說明.txt`：原始版本的參考說明；目前設定請依本 README。
 
-- `index.html`：GitHub Pages 首頁，內容與原始 `Index.html` 相同。
-- `apps-script/Index.html`：原始 Apps Script 前端。
-- `apps-script/Code.gs`：Apps Script 後端，無法在 GitHub Pages 執行。
-- `部署說明.txt`：原始部署說明。
+## 部署與編輯密碼
 
-## 三人共用版本
+後端已部署為 Apps Script 網頁應用程式，執行身分為擁有者，存取方式為所有人。
 
-需另行將 `Code.gs` 與 `Index.html` 部署至 Google Apps Script，並連接指定的 Google 試算表。編輯密碼改由 Apps Script「專案設定 → 指令碼屬性」的 `EDIT_PIN` 讀取，需設定為 6～8 位數。勿將實際密碼提交到公開 GitHub 儲存庫。
+在 Apps Script「專案設定 → 指令碼屬性」設定 `EDIT_PIN`，值為 6～8 位數。密碼只在 Google 後端讀取與驗證，不要提交到 GitHub。
 
-Apps Script 同步程式已建立，等待擁有者完成 Google 授權、設定存取方式與編輯密碼；完成前 GitHub Pages 仍為本機預覽。按鈕文字已統一為「開始編輯」。
+前端與後端程式更新時，需在 Apps Script「管理部署作業」選取新版本並部署；只更新 GitHub 不會更新 Apps Script 的已部署版本。變更指令碼屬性無需重新部署。
+
+原 GitHub 單機預覽版中，各瀏覽器尚未同步的修改不會自動匯入雲端資料庫。
